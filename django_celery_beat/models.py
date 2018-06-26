@@ -12,7 +12,10 @@ from celery import schedules
 from celery.five import python_2_unicode_compatible
 
 from . import managers
+from .tzcrontab import TzAwareCrontab
 from .utils import now, make_aware
+
+import timezone_field
 
 DAYS = 'days'
 HOURS = 'hours'
@@ -150,6 +153,8 @@ class CrontabSchedule(models.Model):
     month_of_year = models.CharField(
         _('month of year'), max_length=64, default='*',
     )
+    timezone = timezone_field.TimeZoneField(default='UTC')
+
 
     class Meta:
         """Table information."""
@@ -157,25 +162,24 @@ class CrontabSchedule(models.Model):
         verbose_name = _('crontab')
         verbose_name_plural = _('crontabs')
         ordering = ['month_of_year', 'day_of_month',
-                    'day_of_week', 'hour', 'minute']
+                    'day_of_week', 'hour', 'minute', 'timezone']
 
     def __str__(self):
-        return '{0} {1} {2} {3} {4} (m/h/d/dM/MY)'.format(
-            cronexp(self.minute),
-            cronexp(self.hour),
-            cronexp(self.day_of_week),
-            cronexp(self.day_of_month),
-            cronexp(self.month_of_year),
+        return '{0} {1} {2} {3} {4} (m/h/d/dM/MY) {5}'.format(
+            cronexp(self.minute), cronexp(self.hour),
+            cronexp(self.day_of_week), cronexp(self.day_of_month),
+            cronexp(self.month_of_year), str(self.timezone)
         )
 
     @property
     def schedule(self):
-        return schedules.crontab(minute=self.minute,
-                                 hour=self.hour,
-                                 day_of_week=self.day_of_week,
-                                 day_of_month=self.day_of_month,
-                                 month_of_year=self.month_of_year,
-                                 nowfun=lambda: make_aware(now()))
+        return TzAwareCrontab(
+            minute=self.minute,
+            hour=self.hour, day_of_week=self.day_of_week,
+            day_of_month=self.day_of_month,
+            month_of_year=self.month_of_year,
+            tz=self.timezone
+        )
 
     @classmethod
     def from_schedule(cls, schedule):
@@ -183,7 +187,8 @@ class CrontabSchedule(models.Model):
                 'hour': schedule._orig_hour,
                 'day_of_week': schedule._orig_day_of_week,
                 'day_of_month': schedule._orig_day_of_month,
-                'month_of_year': schedule._orig_month_of_year}
+                'month_of_year': schedule._orig_month_of_year,
+                'timezone': schedule.tz}
         try:
             return cls.objects.get(**spec)
         except cls.DoesNotExist:
